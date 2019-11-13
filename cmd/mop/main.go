@@ -5,9 +5,10 @@
 package main
 
 import (
-	`github.com/mop-tracker/mop`
-	`github.com/nsf/termbox-go`
-	`time`
+	"time"
+
+	"github.com/mop-tracker/mop"
+	"github.com/nsf/termbox-go"
 )
 
 const help = `Mop v0.2.0 -- Copyright (c) 2013-2016 by Michael Dvorkin. All Rights Reserved.
@@ -28,17 +29,24 @@ Enter comma-delimited list of stock tickers when prompted.
 <r> Press any key to continue </r>
 `
 
+const (
+	timestampQueueInterval = 1 * time.Second
+	quotesQueueInterval    = 5 * time.Second
+	marketQueueInterval    = 12 * time.Second
+)
+
 //-----------------------------------------------------------------------------
 func mainLoop(screen *mop.Screen, profile *mop.Profile) {
 	var lineEditor *mop.LineEditor
 	var columnEditor *mop.ColumnEditor
 
 	keyboardQueue := make(chan termbox.Event)
-	timestampQueue := time.NewTicker(1 * time.Second)
-	quotesQueue := time.NewTicker(5 * time.Second)
-	marketQueue := time.NewTicker(12 * time.Second)
+	timestampQueue := time.NewTicker(timestampQueueInterval)
+	quotesQueue := time.NewTicker(quotesQueueInterval)
+	marketQueue := time.NewTicker(marketQueueInterval)
 	showingHelp := false
 	paused := false
+	marketEnabled := true
 
 	go func() {
 		for {
@@ -48,7 +56,12 @@ func mainLoop(screen *mop.Screen, profile *mop.Profile) {
 
 	market := mop.NewMarket()
 	quotes := mop.NewQuotes(market, profile)
-	screen.Draw(market, quotes)
+
+	if marketEnabled {
+		screen.Draw(market, quotes)
+	} else {
+		screen.Draw(quotes)
+	}
 
 loop:
 	for {
@@ -74,6 +87,14 @@ loop:
 					} else if event.Ch == '?' || event.Ch == 'h' || event.Ch == 'H' {
 						showingHelp = true
 						screen.Clear().Draw(help)
+					} else if event.Ch == 'm' || event.Ch == 'M' {
+						marketEnabled = !marketEnabled
+
+						if !marketEnabled {
+							marketQueue.Stop()
+						} else {
+							marketQueue = time.NewTicker(marketQueueInterval)
+						}
 					}
 				} else if lineEditor != nil {
 					if done := lineEditor.Handle(event); done {
@@ -90,7 +111,11 @@ loop:
 			case termbox.EventResize:
 				screen.Resize()
 				if !showingHelp {
-					screen.Draw(market, quotes)
+					if marketEnabled {
+						screen.Draw(market, quotes)
+					} else {
+						screen.Draw(quotes)
+					}
 				} else {
 					screen.Draw(help)
 				}
@@ -107,7 +132,7 @@ loop:
 			}
 
 		case <-marketQueue.C:
-			if !showingHelp && !paused {
+			if !showingHelp && !paused && marketEnabled {
 				screen.Draw(market)
 			}
 		}
